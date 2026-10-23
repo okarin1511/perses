@@ -104,6 +104,11 @@ func UnmarshalEntitiesAndObjectsFromDirectory(dir string) ([]modelAPI.Entity, []
 	return entities, objects, errors
 }
 
+// ListResourceFiles returns every JSON or YAML file found (recursively) in the given directory.
+func ListResourceFiles(dir string) ([]string, error) {
+	return visit(dir)
+}
+
 func UnmarshalEntitiesFromFile(file string) ([]modelAPI.Entity, error) {
 	u := &unmarshaller{file: file}
 	return u.unmarshal()

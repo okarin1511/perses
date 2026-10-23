@@ -174,6 +174,10 @@ func TestLintCMDWithSchema(t *testing.T) {
 	dir := t.TempDir()
 	schemaPath := writeFile(t, dir, "schema.cue", string(data))
 	valid := writeFile(t, dir, "valid.json", `{"kind":"Dashboard","metadata":{"name":"demo","project":"perses"},"spec":{"display":{"name":"demo"},"duration":"6h","layouts":[],"panels":{}}}`)
+	invalidDir := filepath.Join(dir, "invalid")
+	require.NoError(t, os.Mkdir(invalidDir, 0700))
+	writeFile(t, invalidDir, "first.json", `{"kind":"Dashboard","metadata":{"name":"first","project":"perses"},"spec":{"display":{"name":"first"},"durration":"6h","layouts":[],"panels":{}}}`)
+	writeFile(t, invalidDir, "second.json", `{"kind":"Dashboard","metadata":{"name":"second","project":"perses"},"spec":{"dispaly":{"name":"second"},"duration":"6h","layouts":[],"panels":{}}}`)
 	misspelled := writeFile(t, dir, "misspelled.json", `{"kind":"Dashboard","metadata":{"name":"demo","project":"perses"},"spec":{"display":{"name":"demo"},"durration":"6h","layouts":[],"panels":{}}}`)
 	// The panel key is an unquoted number, which the YAML decoder doesn't decode as a string key.
 	numericKey := writeFile(t, dir, "numeric-key.yaml", `kind: Dashboard
@@ -214,7 +218,7 @@ spec:
 			Title:           "variable with an invalid name",
 			Args:            []string{"-f", invalidVariable, "--schema", schemaPath},
 			IsErrorExpected: true,
-			ExpectedMessage: "variable name '123' is not valid",
+			ExpectedMessage: "1 invalid resource(s) found:\n- GlobalVariable \"123\" (file \"" + invalidVariable + "\"): variable name '123' is not valid",
 		},
 		{
 			Title:           "valid dashboard",
@@ -230,7 +234,15 @@ spec:
 			Title:           "misspelled field",
 			Args:            []string{"-f", misspelled, "--schema", schemaPath},
 			IsErrorExpected: true,
-			ExpectedMessage: `invalid dashboard "demo": spec.durration: field not allowed`,
+			ExpectedMessage: "1 invalid resource(s) found:\n- Dashboard \"perses/demo\" (file \"" + misspelled + "\"): spec.durration: field not allowed",
+		},
+		{
+			Title:           "every invalid dashboard of a directory is reported",
+			Args:            []string{"-d", invalidDir, "--schema", schemaPath},
+			IsErrorExpected: true,
+			ExpectedMessage: "2 invalid resource(s) found:\n" +
+				"- Dashboard \"perses/first\" (file \"" + filepath.Join(invalidDir, "first.json") + "\"): spec.durration: field not allowed\n" +
+				"- Dashboard \"perses/second\" (file \"" + filepath.Join(invalidDir, "second.json") + "\"): spec.dispaly: field not allowed",
 		},
 		{
 			Title:           "schema and online are mutually exclusive",
@@ -288,7 +300,7 @@ func TestLintCMDWithSchemaConsistency(t *testing.T) {
 			Title:                "two default datasources of the same kind",
 			Args:                 []string{"-f", twoDefaults, "--schema", schemaPath},
 			IsErrorExpected:      true,
-			ExpectedRegexMessage: `^unexpected error in dashboard "demo": [ab] can not be defined as default datasource: there is already a default defined for kind "PrometheusDatasource"$`,
+			ExpectedRegexMessage: `^1 invalid resource\(s\) found:\n- Dashboard "perses/demo" \(file "[^"]+"\): [ab] can not be defined as default datasource: there is already a default defined for kind "PrometheusDatasource"$`,
 		},
 	})
 }

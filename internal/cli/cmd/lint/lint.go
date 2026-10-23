@@ -16,6 +16,7 @@ package lint
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/perses/perses/internal/api/plugin"
 	"github.com/perses/perses/internal/api/plugin/schema"
@@ -31,6 +32,68 @@ import (
 	modelV1 "github.com/perses/perses/pkg/model/api/v1"
 	"github.com/spf13/cobra"
 )
+
+// sourcedEntity is an entity together with the raw object it has been decoded from, and the file it has been read from.
+// The raw object is kept for the validation against the dashboard schema, as the entity loses the unknown fields.
+type sourcedEntity struct {
+	entity modelAPI.Entity
+	object map[string]any
+	file   string
+}
+
+// lintError describes why a resource (or a file, when it cannot be decoded) is invalid.
+type lintError struct {
+	kind    string
+	project string
+	name    string
+	file    string
+	err     error
+}
+
+func (e *lintError) Error() string {
+	var sb strings.Builder
+	if len(e.kind) > 0 {
+		sb.WriteString(e.kind)
+		sb.WriteString(" ")
+		if len(e.project) > 0 {
+			_, _ = fmt.Fprintf(&sb, "%q", e.project+"/"+e.name)
+		} else {
+			_, _ = fmt.Fprintf(&sb, "%q", e.name)
+		}
+		if len(e.file) > 0 {
+			_, _ = fmt.Fprintf(&sb, " (file %q)", e.file)
+		}
+		sb.WriteString(": ")
+	}
+	sb.WriteString(e.err.Error())
+	return sb.String()
+}
+
+func newEntityLintError(se sourcedEntity, err error) *lintError {
+	lintErr := &lintError{
+		kind: se.entity.GetKind(),
+		file: se.file,
+		err:  err,
+	}
+	switch m := se.entity.GetMetadata().(type) {
+	case *modelV1.ProjectMetadata:
+		lintErr.name = m.Name
+		lintErr.project = m.Project
+	default:
+		lintErr.name = m.GetName()
+	}
+	return lintErr
+}
+
+func buildError(lintErrors []*lintError) error {
+	var sb strings.Builder
+	_, _ = fmt.Fprintf(&sb, "%d invalid resource(s) found:", len(lintErrors))
+	for _, lintErr := range lintErrors {
+		sb.WriteString("\n- ")
+		sb.WriteString(lintErr.Error())
+	}
+	return fmt.Errorf("%s", sb.String())
+}
 
 type option struct {
 	persesCMD.Option
@@ -99,26 +162,42 @@ func (o *option) Validate() error {
 }
 
 func (o *option) Execute() error {
-	var entities []modelAPI.Entity
-	// The raw objects are kept for the validation against the dashboard schema, as the entities lose the unknown fields.
-	var objects []map[string]any
+	var entities []sourcedEntity
+	var lintErrors []*lintError
 	if len(o.File) > 0 {
-		var err error
-		entities, objects, err = file.UnmarshalEntitiesAndObjectsFromFile(o.File)
+		es, objs, err := file.UnmarshalEntitiesAndObjectsFromFile(o.File)
 		if err != nil {
 			return err
 		}
+		entities = withSource(es, objs, o.File)
 	} else if len(o.Directory) > 0 {
-		var errorList []error
-		entities, objects, errorList = file.UnmarshalEntitiesAndObjectsFromDirectory(o.Directory)
-		if len(errorList) > 0 {
-			return errorList[0]
+		files, err := file.ListResourceFiles(o.Directory)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			es, objs, unmarshalErr := file.UnmarshalEntitiesAndObjectsFromFile(f)
+			if unmarshalErr != nil {
+				// The error returned already mentions the file.
+				lintErrors = append(lintErrors, &lintError{file: f, err: unmarshalErr})
+				continue
+			}
+			entities = append(entities, withSource(es, objs, f)...)
 		}
 	}
-	if validateErr := o.validate(entities, objects); validateErr != nil {
-		return validateErr
+	lintErrors = append(lintErrors, o.validate(entities)...)
+	if len(lintErrors) > 0 {
+		return buildError(lintErrors)
 	}
 	return output.HandleString(o.writer, "your resources look good")
+}
+
+func withSource(entities []modelAPI.Entity, objects []map[string]any, f string) []sourcedEntity {
+	result := make([]sourcedEntity, 0, len(entities))
+	for i, entity := range entities {
+		result = append(result, sourcedEntity{entity: entity, object: objects[i], file: f})
+	}
+	return result
 }
 
 func (o *option) SetWriter(writer io.Writer) {
@@ -129,68 +208,60 @@ func (o *option) SetErrWriter(errWriter io.Writer) {
 	o.errWriter = errWriter
 }
 
-func (o *option) validate(objects []modelAPI.Entity, rawObjects []map[string]any) error {
+// validate checks every entity and returns all the errors found, instead of stopping at the first one.
+func (o *option) validate(objects []sourcedEntity) []*lintError {
 	if o.sch == nil && !o.online && o.dashboardSch == nil {
 		return nil
 	}
+	var lintErrors []*lintError
+	for _, object := range objects {
+		if err := o.validateEntity(object); err != nil {
+			lintErrors = append(lintErrors, newEntityLintError(object, err))
+		}
+	}
+	return lintErrors
+}
+
+func (o *option) validateEntity(sourced sourcedEntity) error {
 	// When linting offline, the configuration of the server is unknown.
 	// So the server-dependent checks (like the maximum timeout of the datasource proxy) are skipped by passing a nil proxy config.
 	// They are done by the server when using the online mode.
-	for i, object := range objects {
-		switch entity := object.(type) {
-		case *modelV1.Dashboard:
-			if err := validate.DashboardWithCustomRules(entity, o.customRules); err != nil {
-				return err
-			}
-			if o.online {
-				if err := o.apiClient.Validate().Dashboard(entity); err != nil {
-					return err
-				}
-			} else {
-				// The complete dashboard schema is checked with the raw object, as the Go struct silently drops the unknown fields.
-				// It is checked first, as the checks of DashboardSpec expect valid variables.
-				if o.dashboardSch != nil {
-					if err := o.dashboardSch.validate(rawObjects[i]); err != nil {
-						return fmt.Errorf("invalid dashboard %q: %w", entity.Metadata.Name, err)
-					}
-				}
-				if err := validate.DashboardSpec(entity.Spec, o.sch, nil); err != nil {
-					return fmt.Errorf("unexpected error in dashboard %q: %w", entity.Metadata.Name, err)
-				}
-			}
-		case *modelV1.GlobalDatasource:
-			if o.online {
-				if err := o.apiClient.Validate().GlobalDatasource(entity); err != nil {
-					return err
-				}
-			} else if err := validate.Datasource(entity, nil, o.sch, nil); err != nil {
-				return err
-			}
-		case *modelV1.Datasource:
-			if o.online {
-				if err := o.apiClient.Validate().Datasource(entity); err != nil {
-					return err
-				}
-			} else if err := validate.Datasource(entity, nil, o.sch, nil); err != nil {
-				return err
-			}
-		case *modelV1.GlobalVariable:
-			if o.online {
-				if err := o.apiClient.Validate().GlobalVariable(entity); err != nil {
-					return err
-				}
-			} else if err := validate.Variable(entity, o.sch); err != nil {
-				return err
-			}
-		case *modelV1.Variable:
-			if o.online {
-				if err := o.apiClient.Validate().Variable(entity); err != nil {
-					return err
-				}
-			} else if err := validate.Variable(entity, o.sch); err != nil {
+	switch entity := sourced.entity.(type) {
+	case *modelV1.Dashboard:
+		if err := validate.DashboardWithCustomRules(entity, o.customRules); err != nil {
+			return err
+		}
+		if o.online {
+			return o.apiClient.Validate().Dashboard(entity)
+		}
+		// The complete dashboard schema is checked with the raw object, as the Go struct silently drops the unknown fields.
+		// It is checked first, as the checks of DashboardSpec expect valid variables.
+		if o.dashboardSch != nil {
+			if err := o.dashboardSch.validate(sourced.object); err != nil {
 				return err
 			}
 		}
+		return validate.DashboardSpec(entity.Spec, o.sch, nil)
+	case *modelV1.GlobalDatasource:
+		if o.online {
+			return o.apiClient.Validate().GlobalDatasource(entity)
+		}
+		return validate.Datasource(entity, nil, o.sch, nil)
+	case *modelV1.Datasource:
+		if o.online {
+			return o.apiClient.Validate().Datasource(entity)
+		}
+		return validate.Datasource(entity, nil, o.sch, nil)
+	case *modelV1.GlobalVariable:
+		if o.online {
+			return o.apiClient.Validate().GlobalVariable(entity)
+		}
+		return validate.Variable(entity, o.sch)
+	case *modelV1.Variable:
+		if o.online {
+			return o.apiClient.Validate().Variable(entity)
+		}
+		return validate.Variable(entity, o.sch)
 	}
 	return nil
 }
