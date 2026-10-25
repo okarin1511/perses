@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	modelAPI "github.com/perses/perses/pkg/model/api"
 	modelV1 "github.com/perses/perses/pkg/model/api/v1"
@@ -143,6 +144,10 @@ func UnmarshalEntitiesAndObjectsFromFileCollectingErrors(file string) ([]modelAP
 	for i, object := range u.objects {
 		entity, err := u.unmarshalObject(i, object)
 		if err != nil {
+			// Keep the index, so failures from resources of the same file can be told apart.
+			if index := fmt.Sprintf("objects[%d]", i); !strings.Contains(err.Error(), index) {
+				err = fmt.Errorf("%s: %w", index, err)
+			}
 			errs = append(errs, err)
 			continue
 		}

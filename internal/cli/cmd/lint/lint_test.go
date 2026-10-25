@@ -43,7 +43,7 @@ func TestLintCMD(t *testing.T) {
 			Args:            []string{"-f", "../../test/sample_resources/unknown_resource.json"},
 			IsErrorExpected: true,
 			ExpectedMessage: `1 invalid resource(s) found:
-- resource "game" from file "../../test/sample_resources/unknown_resource.json" not supported by the command`,
+- objects[0]: resource "game" from file "../../test/sample_resources/unknown_resource.json" not supported by the command`,
 		},
 		{
 			Title:           "lint a single resource",
@@ -64,7 +64,7 @@ func TestLintCMD(t *testing.T) {
 			Args:            []string{"-f", "testdata/lint_invalid/mixed.json"},
 			IsErrorExpected: true,
 			ExpectedMessage: `2 invalid resource(s) found:
-- file "testdata/lint_invalid/mixed.json": cannot extract Dashboard, unmarshalling error: spec cannot be empty
+- file "testdata/lint_invalid/mixed.json": objects[1]: cannot extract Dashboard, unmarshalling error: spec cannot be empty
 - objects[2] from file "testdata/lint_invalid/mixed.json" unable to find 'kind' field`,
 		},
 		{
@@ -72,9 +72,9 @@ func TestLintCMD(t *testing.T) {
 			Args:            []string{"-d", "testdata/lint_invalid"},
 			IsErrorExpected: true,
 			ExpectedMessage: `4 invalid resource(s) found:
-- file "testdata/lint_invalid/mixed.json": cannot extract Dashboard, unmarshalling error: spec cannot be empty
+- file "testdata/lint_invalid/mixed.json": objects[1]: cannot extract Dashboard, unmarshalling error: spec cannot be empty
 - objects[2] from file "testdata/lint_invalid/mixed.json" unable to find 'kind' field
-- resource "game" from file "testdata/lint_invalid/unknown_kind.json" not supported by the command
+- objects[0]: resource "game" from file "testdata/lint_invalid/unknown_kind.json" not supported by the command
 - objects[0] from file "testdata/lint_invalid/zz_missing_kind.json" unable to find 'kind' field`,
 		},
 	}
