@@ -16,6 +16,7 @@ package lint
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/perses/perses/internal/api/plugin"
@@ -64,6 +65,9 @@ func (e *lintError) Error() string {
 			_, _ = fmt.Fprintf(&sb, " (file %q)", e.file)
 		}
 		sb.WriteString(": ")
+	} else if len(e.file) > 0 && !strings.Contains(e.err.Error(), strconv.Quote(e.file)) {
+		// Some decoding errors don't mention the file, which is needed to tell the failures apart.
+		_, _ = fmt.Fprintf(&sb, "file %q: ", e.file)
 	}
 	sb.WriteString(e.err.Error())
 	return sb.String()
@@ -165,24 +169,25 @@ func (o *option) Execute() error {
 	var entities []sourcedEntity
 	var lintErrors []*lintError
 	if len(o.File) > 0 {
-		es, objs, err := file.UnmarshalEntitiesAndObjectsFromFile(o.File)
+		es, objs, errs, err := file.UnmarshalEntitiesAndObjectsFromFileCollectingErrors(o.File)
 		if err != nil {
 			return err
 		}
 		entities = withSource(es, objs, o.File)
+		lintErrors = append(lintErrors, toFileLintErrors(errs, o.File)...)
 	} else if len(o.Directory) > 0 {
 		files, err := file.ListResourceFiles(o.Directory)
 		if err != nil {
 			return err
 		}
 		for _, f := range files {
-			es, objs, unmarshalErr := file.UnmarshalEntitiesAndObjectsFromFile(f)
-			if unmarshalErr != nil {
-				// The error returned already mentions the file.
-				lintErrors = append(lintErrors, &lintError{file: f, err: unmarshalErr})
+			es, objs, errs, fileErr := file.UnmarshalEntitiesAndObjectsFromFileCollectingErrors(f)
+			if fileErr != nil {
+				lintErrors = append(lintErrors, &lintError{file: f, err: fileErr})
 				continue
 			}
 			entities = append(entities, withSource(es, objs, f)...)
+			lintErrors = append(lintErrors, toFileLintErrors(errs, f)...)
 		}
 	}
 	lintErrors = append(lintErrors, o.validate(entities)...)
@@ -190,6 +195,14 @@ func (o *option) Execute() error {
 		return buildError(lintErrors)
 	}
 	return output.HandleString(o.writer, "your resources look good")
+}
+
+func toFileLintErrors(errs []error, f string) []*lintError {
+	result := make([]*lintError, 0, len(errs))
+	for _, err := range errs {
+		result = append(result, &lintError{file: f, err: err})
+	}
+	return result
 }
 
 func withSource(entities []modelAPI.Entity, objects []map[string]any, f string) []sourcedEntity {

@@ -171,3 +171,45 @@ func TestReadJSONKeepsExactNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestUnmarshalEntitiesAndObjectsFromFileCollectingErrors(t *testing.T) {
+	p := writeTemp(t, "resources.yaml", `kind: Project
+metadata:
+  name: first-project
+---
+metadata:
+  name: no-kind
+---
+kind: Dashboard
+metadata:
+  name: empty
+  project: first-project
+---
+kind: Project
+metadata:
+  name: second-project
+`)
+	entities, objects, errs, err := UnmarshalEntitiesAndObjectsFromFileCollectingErrors(p)
+	if err != nil {
+		t.Fatalf("unexpected file error: %v", err)
+	}
+	if len(entities) != 2 || len(objects) != 2 {
+		t.Fatalf("expected 2 entities and objects, got %d and %d", len(entities), len(objects))
+	}
+	for i, name := range []string{"first-project", "second-project"} {
+		if entities[i].GetMetadata().GetName() != name {
+			t.Errorf("entities[%d]: expected name %q, got %q", i, name, entities[i].GetMetadata().GetName())
+		}
+		if objects[i]["metadata"].(map[string]any)["name"] != name {
+			t.Errorf("objects[%d]: expected name %q", i, name)
+		}
+	}
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 resource errors, got %d: %v", len(errs), errs)
+	}
+
+	broken := writeTemp(t, "broken.json", `{not json`)
+	if _, _, _, fileErr := UnmarshalEntitiesAndObjectsFromFileCollectingErrors(broken); fileErr == nil {
+		t.Error("expected a file error for invalid JSON")
+	}
+}

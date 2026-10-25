@@ -42,7 +42,8 @@ func TestLintCMD(t *testing.T) {
 			Title:           "lint unknown document",
 			Args:            []string{"-f", "../../test/sample_resources/unknown_resource.json"},
 			IsErrorExpected: true,
-			ExpectedMessage: `resource "game" from file "../../test/sample_resources/unknown_resource.json" not supported by the command`,
+			ExpectedMessage: `1 invalid resource(s) found:
+- resource "game" from file "../../test/sample_resources/unknown_resource.json" not supported by the command`,
 		},
 		{
 			Title:           "lint a single resource",
@@ -59,10 +60,20 @@ func TestLintCMD(t *testing.T) {
 `,
 		},
 		{
+			Title:           "lint a file reports every resource that cannot be decoded",
+			Args:            []string{"-f", "testdata/lint_invalid/mixed.json"},
+			IsErrorExpected: true,
+			ExpectedMessage: `2 invalid resource(s) found:
+- file "testdata/lint_invalid/mixed.json": cannot extract Dashboard, unmarshalling error: spec cannot be empty
+- objects[2] from file "testdata/lint_invalid/mixed.json" unable to find 'kind' field`,
+		},
+		{
 			Title:           "lint a directory reports every invalid file",
 			Args:            []string{"-d", "testdata/lint_invalid"},
 			IsErrorExpected: true,
-			ExpectedMessage: `2 invalid resource(s) found:
+			ExpectedMessage: `4 invalid resource(s) found:
+- file "testdata/lint_invalid/mixed.json": cannot extract Dashboard, unmarshalling error: spec cannot be empty
+- objects[2] from file "testdata/lint_invalid/mixed.json" unable to find 'kind' field
 - resource "game" from file "testdata/lint_invalid/unknown_kind.json" not supported by the command
 - objects[0] from file "testdata/lint_invalid/zz_missing_kind.json" unable to find 'kind' field`,
 		},
@@ -114,6 +125,6 @@ func TestLintErrorMessage(t *testing.T) {
 	expected := `3 invalid resource(s) found:
 - Dashboard "perses/demo" (file "dashboards/demo.yaml"): invalid panel
 - GlobalDatasource "prom": invalid plugin
-- unable to read`
+- file "broken.json": unable to read`
 	assert.Equal(t, expected, buildError(errs).Error())
 }
