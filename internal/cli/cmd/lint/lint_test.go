@@ -15,6 +15,8 @@ package lint
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/perses/perses/internal/api/plugin/schema"
@@ -71,11 +73,14 @@ func TestLintCMD(t *testing.T) {
 			Title:           "lint a directory reports every invalid file",
 			Args:            []string{"-d", "testdata/lint_invalid"},
 			IsErrorExpected: true,
-			ExpectedMessage: `4 invalid resource(s) found:
-- file "testdata/lint_invalid/mixed.json": objects[1]: cannot extract Dashboard, unmarshalling error: spec cannot be empty
-- objects[2] from file "testdata/lint_invalid/mixed.json" unable to find 'kind' field
-- objects[0]: resource "game" from file "testdata/lint_invalid/unknown_kind.json" not supported by the command
-- objects[0] from file "testdata/lint_invalid/zz_missing_kind.json" unable to find 'kind' field`,
+			ExpectedMessage: fmt.Sprintf(`4 invalid resource(s) found:
+- file %[1]q: objects[1]: cannot extract Dashboard, unmarshalling error: spec cannot be empty
+- objects[2] from file %[1]q unable to find 'kind' field
+- objects[0]: resource "game" from file %[2]q not supported by the command
+- objects[0] from file %[3]q unable to find 'kind' field`,
+				filepath.Join("testdata", "lint_invalid", "mixed.json"),
+				filepath.Join("testdata", "lint_invalid", "unknown_kind.json"),
+				filepath.Join("testdata", "lint_invalid", "zz_missing_kind.json")),
 		},
 	}
 	cmdTest.ExecuteSuiteTest(t, NewCMD, testSuite)

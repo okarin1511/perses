@@ -234,15 +234,16 @@ spec:
 			Title:           "misspelled field",
 			Args:            []string{"-f", misspelled, "--schema", schemaPath},
 			IsErrorExpected: true,
-			ExpectedMessage: "1 invalid resource(s) found:\n- Dashboard \"perses/demo\" (file \"" + misspelled + "\"): spec.durration: field not allowed",
+			ExpectedMessage: fmt.Sprintf("1 invalid resource(s) found:\n- Dashboard \"perses/demo\" (file %q): spec.durration: field not allowed", misspelled),
 		},
 		{
 			Title:           "every invalid dashboard of a directory is reported",
 			Args:            []string{"-d", invalidDir, "--schema", schemaPath},
 			IsErrorExpected: true,
-			ExpectedMessage: "2 invalid resource(s) found:\n" +
-				"- Dashboard \"perses/first\" (file \"" + filepath.Join(invalidDir, "first.json") + "\"): spec.durration: field not allowed\n" +
-				"- Dashboard \"perses/second\" (file \"" + filepath.Join(invalidDir, "second.json") + "\"): spec.dispaly: field not allowed",
+			ExpectedMessage: fmt.Sprintf("2 invalid resource(s) found:\n"+
+				"- Dashboard \"perses/first\" (file %q): spec.durration: field not allowed\n"+
+				"- Dashboard \"perses/second\" (file %q): spec.dispaly: field not allowed",
+				filepath.Join(invalidDir, "first.json"), filepath.Join(invalidDir, "second.json")),
 		},
 		{
 			Title:           "schema and online are mutually exclusive",
