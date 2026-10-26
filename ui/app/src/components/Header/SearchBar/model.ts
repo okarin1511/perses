@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import type { MatchingResult } from '@nexucis/kvsearch';
 import type { DashboardResource, Resource } from '@perses-dev/client';
 
 export interface ResourceListProps {
@@ -45,4 +46,12 @@ export interface SearchListProps {
 
 export interface SearchItemProps {
   handleClose: SearchListProps['handleClose'];
+  matchingResult: MatchingResult[];
+}
+
+export interface TagsDisplayValue {
+  normalizedMatchingTags: Set<string>;
+  visibleTags: string[];
+  hiddenTagsCount: number;
+  hasAnyTags: boolean;
 }

@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useDashboardList } from '../../../model/dashboard-client';
 import { useDatasourceList } from '../../../model/datasource-client';
-import type { HighlightedDashboardResource, SearchItem, SearchListProps } from './model';
+import type { HighlightedDashboardResource, SearchItem, SearchListProps, TagsDisplayValue } from './model';
 import { SearchDashboardItem } from './SearchDashboardItem';
 import { SearchDatasourceItem } from './SearchDatasourceItem';
 import { SearchGlobalDatasourceItem } from './SearchGlobalDatasourceItem';
@@ -31,14 +31,19 @@ const kvSearchConfig: KVSearchConfiguration = {
   indexedKeys: [
     ['metadata', 'name'],
     ['metadata', 'tags'],
+    ['spec', 'display', 'name'],
   ],
   shouldSort: true,
   includeMatches: true,
   shouldRender: false,
   excludedChars: [' '],
+  findAllMatches: true,
 };
 
 const SIZE_LIST = 10;
+const MAX_VISIBLE_RESOURCE_TAGS = 3;
+
+type SearchMatch = NonNullable<KVSearchResult<SearchItem>['matched']>[number];
 
 interface PaginationState {
   list: SearchItem[];
@@ -46,13 +51,41 @@ interface PaginationState {
   size: number;
 }
 
-function buildBoxSearchKey(resource: Resource): string {
+const buildBoxSearchKey = (resource: Resource): string => {
   return isProjectMetadata(resource.metadata)
     ? `${resource.kind}-${resource.metadata.project}-${resource.metadata.name}`
     : `${resource.kind}-${resource.metadata.name}`;
-}
+};
 
-const staticSx = {
+const isTagMatch = (match: SearchMatch): match is SearchMatch & { value: string } => {
+  return (
+    match.path.length === 2 &&
+    match.path[0] === 'metadata' &&
+    match.path[1] === 'tags' &&
+    typeof match.value === 'string'
+  );
+};
+
+const getMatchingTagValues = (matched: KVSearchResult<SearchItem>['matched']): string[] => {
+  return Array.from(new Set((matched ?? []).filter(isTagMatch).map((match) => match.value)));
+};
+
+const getTagDisplayValues = (tags: string[] | undefined, matchingTagValues: string[]): TagsDisplayValue => {
+  const normalizedMatchingTags = new Set(matchingTagValues.map((tag) => tag.toLowerCase()));
+  const uniqueTags = Array.from(new Set(tags ?? []));
+  const matchedTags = uniqueTags.filter((tag) => normalizedMatchingTags.has(tag.toLowerCase()));
+  const unmatchedTags = uniqueTags.filter((tag) => !normalizedMatchingTags.has(tag.toLowerCase()));
+  const orderedTags = [...matchedTags, ...unmatchedTags];
+
+  return {
+    normalizedMatchingTags,
+    visibleTags: orderedTags.slice(0, MAX_VISIBLE_RESOURCE_TAGS),
+    hiddenTagsCount: Math.max(0, orderedTags.length - MAX_VISIBLE_RESOURCE_TAGS),
+    hasAnyTags: orderedTags.length > 0,
+  };
+};
+
+const STATIC_SX = {
   flexColumn: { display: 'flex', flexDirection: 'column', flexShrink: 0, height: 'auto', minHeight: 0, minWidth: 0 },
   flexRow: {
     display: 'flex',
@@ -113,53 +146,72 @@ export function SearchList(props: SearchListProps): ReactElement | null {
   if (!filteredList.length) return null;
 
   return (
-    <Box sx={staticSx.flexColumn}>
-      <Box sx={staticSx.flexRow}>
+    <Box sx={STATIC_SX.flexColumn}>
+      <Box sx={STATIC_SX.flexRow}>
         <Typography variant="h3">{`${filteredList[0]?.original.kind}s (${filteredList.length})`}</Typography>
       </Box>
       <Stack display="flex" direction="column">
         {originalKind === 'Dashboard' &&
-          filteredList
-            .slice(0, currentSizeList)
-            .map(({ original }) => (
+          filteredList.slice(0, currentSizeList).map((search) => {
+            if (!search.matched?.length) {
+              return null;
+            }
+            const matchedTags = getMatchingTagValues(search.matched);
+            const tagsDisplayValue = getTagDisplayValues(search.original.metadata.tags, matchedTags);
+            return (
               <SearchDashboardItem
+                tagsDisplayValue={tagsDisplayValue}
+                matchingResult={search.matched}
                 handleClose={handleClose}
-                key={`${buildBoxSearchKey(original)}`}
-                resource={original as HighlightedDashboardResource}
+                key={`${buildBoxSearchKey(search.original)}`}
+                resource={search.original as HighlightedDashboardResource}
               />
-            ))}
+            );
+          })}
         {originalKind === 'Datasource' &&
-          filteredList
-            .slice(0, currentSizeList)
-            .map(({ original }) => (
+          filteredList.slice(0, currentSizeList).map((search) => {
+            if (!search.matched?.length) {
+              return null;
+            }
+            return (
               <SearchDatasourceItem
+                matchingResult={search.matched}
                 handleClose={handleClose}
-                key={`${buildBoxSearchKey(original)}`}
-                resource={original as DatasourceResource}
+                key={`${buildBoxSearchKey(search.original)}`}
+                resource={search.original as DatasourceResource}
               />
-            ))}
+            );
+          })}
         {originalKind === 'Project' &&
-          filteredList
-            .slice(0, currentSizeList)
-            .map(({ original }) => (
+          filteredList.slice(0, currentSizeList).map((search) => {
+            if (!search.matched?.length) {
+              return null;
+            }
+            return (
               <SearchProjectItem
+                matchingResult={search.matched}
                 handleClose={handleClose}
-                key={`${buildBoxSearchKey(original)}`}
-                resource={original as ProjectResource}
-                datasourceCount={datasourceCounts.get((original as ProjectResource).metadata.name) ?? 0}
-                dashboardCount={dashboardCount.get((original as ProjectResource).metadata.name) ?? 0}
+                key={`${buildBoxSearchKey(search.original)}`}
+                resource={search.original as ProjectResource}
+                datasourceCount={datasourceCounts.get((search.original as ProjectResource).metadata.name) ?? 0}
+                dashboardCount={dashboardCount.get((search.original as ProjectResource).metadata.name) ?? 0}
               />
-            ))}
+            );
+          })}
         {originalKind === 'GlobalDatasource' &&
-          filteredList
-            .slice(0, currentSizeList)
-            .map(({ original }) => (
+          filteredList.slice(0, currentSizeList).map((search) => {
+            if (!search.matched?.length) {
+              return null;
+            }
+            return (
               <SearchGlobalDatasourceItem
+                matchingResult={search.matched}
                 handleClose={handleClose}
-                key={`${buildBoxSearchKey(original)}`}
-                resource={original as GlobalDatasourceResource}
+                key={`${buildBoxSearchKey(search.original)}`}
+                resource={search.original as GlobalDatasourceResource}
               />
-            ))}
+            );
+          })}
         {filteredList.length > currentSizeList && <Button onClick={handleSeeMore}>see more...</Button>}
       </Stack>
     </Box>

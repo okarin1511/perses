@@ -20,7 +20,8 @@ import type { ReactElement } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 
 import { ProjectRoute } from '../../../model/route';
-import type { HighlightedDashboardResource, SearchItemProps } from './model';
+import { HighlightedMatch } from './HighlightedMatch';
+import type { HighlightedDashboardResource, SearchItemProps, TagsDisplayValue } from './model';
 import { SearchRow } from './SearchRow';
 
 export const DASHBOARD_ITEM_DATA_TEST_IDS = {
@@ -36,11 +37,8 @@ const STATIC_SX = {
     flex: 1,
     textDecoration: 'none',
   },
-  right: {
-    ml: 'auto',
-    alignItems: 'center',
-    gap: 0.5,
-  },
+  right: { ml: 'auto', alignItems: 'center', gap: 0.5 },
+  tags: { ml: 'auto', alignItems: 'center', gap: 0.5, textDecoration: 'none', cursor: 'pointer' },
   projectChip: {
     cursor: 'pointer',
     height: 20,
@@ -63,14 +61,29 @@ const STATIC_SX = {
   },
 } satisfies Record<string, SxProps<Theme>>;
 
+const MATCHED_TAGS_CHIP_SX = {
+  backgroundColor: (theme: Theme): string =>
+    theme.palette.mode === 'dark' ? 'rgba(255, 193, 7, 0.18)' : 'rgba(255, 243, 205, 0.9)',
+  borderColor: (theme: Theme): string =>
+    theme.palette.mode === 'dark' ? theme.palette.warning.main : theme.palette.warning.dark,
+  color: (theme: Theme): string =>
+    theme.palette.mode === 'dark' ? theme.palette.warning.light : theme.palette.warning.dark,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
 export interface SearchDashboardItemProps extends SearchItemProps {
   resource: HighlightedDashboardResource;
+  tagsDisplayValue: TagsDisplayValue;
 }
 
 export const SearchDashboardItem = (props: SearchDashboardItemProps): ReactElement => {
   const {
     resource,
+    tagsDisplayValue: { hasAnyTags, hiddenTagsCount, normalizedMatchingTags, visibleTags },
+    matchingResult,
     resource: {
+      spec,
       metadata: { name, project },
       kind,
       highlight,
@@ -89,6 +102,10 @@ export const SearchDashboardItem = (props: SearchDashboardItemProps): ReactEleme
     );
   }, [highlight]);
 
+  const displayName = spec.display?.name || name;
+  const displayPath = spec.display?.name ? 'spec.display.name' : 'metadata.name';
+  const match = matchingResult.find((mr) => mr.path.join('.') === displayPath);
+
   return (
     <SearchRow>
       <Stack
@@ -100,11 +117,32 @@ export const SearchDashboardItem = (props: SearchDashboardItemProps): ReactEleme
         direction="row"
       >
         <DashboardIcon fontSize="small" />
-        <Typography data-testid={`${DASHBOARD_ITEM_DATA_TEST_IDS.dashboardRowName}-${name}`} sx={STATIC_SX.name}>
-          {name}
-        </Typography>
+        {match ? (
+          <HighlightedMatch
+            value={displayName}
+            intervals={match.intervals}
+            sx={STATIC_SX.name}
+            dataTestId={`${DASHBOARD_ITEM_DATA_TEST_IDS.dashboardRowName}-${name}`}
+          />
+        ) : (
+          <Typography sx={STATIC_SX.name}>{spec.display?.name || name}</Typography>
+        )}
       </Stack>
       <Stack direction="row" sx={STATIC_SX.right}>
+        {hasAnyTags && (
+          <Stack onClick={handleClose} direction="row" sx={STATIC_SX.tags} component={RouterLink} to={dashboardURL}>
+            {visibleTags.map((tag) => (
+              <Chip
+                label={tag}
+                size="small"
+                variant="outlined"
+                sx={normalizedMatchingTags.has(tag.toLowerCase()) ? MATCHED_TAGS_CHIP_SX : undefined}
+                key={`${kind}-${project}-${name}-${tag}`}
+              />
+            ))}
+            {hiddenTagsCount > 0 && <Chip label={`+${hiddenTagsCount}`} size="small" variant="outlined" />}
+          </Stack>
+        )}
         <Chip
           onClick={handleClose}
           component={RouterLink}
